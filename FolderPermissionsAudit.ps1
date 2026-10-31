@@ -4,8 +4,11 @@
 # Mode: Read-only audit
 
 # 1. Set folder locations
-$RootFolder = Join-Path $HOME "PermissionsAuditDemo"
-$ReportFolder = Join-Path $HOME "PermissionsAuditReports"
+[CmdletBinding()]
+param(
+    [string]$RootFolder = (Join-Path $HOME "PermissionsAuditDemo"),
+    [string]$ReportFolder = (Join-Path $HOME "PermissionsAuditReports")
+)
 
 # 2. Check that the practice folder exists
 if (-not (Test-Path -LiteralPath $RootFolder -PathType Container)) {
@@ -14,12 +17,19 @@ if (-not (Test-Path -LiteralPath $RootFolder -PathType Container)) {
 
 # 3. Create the reports directory
 New-Item -ItemType Directory -Path $ReportFolder `
-    -Force | Out-Null
+    -Force -ErrorAction Stop | Out-Null
 
 # 4. Collect the main folder and subfolders
-$allFolders = @(Get-Item -LiteralPath $RootFolder) +
+$discoveryErrors = @()
+$auditFailures = 0
+$allFolders = @(Get-Item -LiteralPath $RootFolder -ErrorAction Stop) +
     @(Get-ChildItem -LiteralPath $RootFolder `
-        -Directory -Recurse -Force -ErrorAction SilentlyContinue)
+        -Directory -Recurse -Force -ErrorAction SilentlyContinue `
+        -ErrorVariable +discoveryErrors)
+
+foreach ($discoveryError in $discoveryErrors) {
+    Write-Warning "Folder discovery was incomplete: $discoveryError"
+}
 
 # 5. Examine permissions for every folder
 $results = foreach ($folder in $allFolders) {
@@ -69,7 +79,8 @@ $results = foreach ($folder in $allFolders) {
         }
     }
     catch {
-        Write-Warning "Unable to audit $($folder.FullName)"
+        $auditFailures++
+        Write-Warning "Unable to audit $($folder.FullName): $_"
     }
 }
 
@@ -80,7 +91,7 @@ if ($results.Count -eq 0) {
 }
 
 # 6. Create timestamped report filenames
-$timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+$timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss_fff"
 
 $allReport = Join-Path $ReportFolder `
     "AllPermissions_$timestamp.csv"
@@ -90,7 +101,7 @@ $flagReport = Join-Path $ReportFolder `
 
 # 7. Export the complete audit
 $results | Export-Csv -LiteralPath $allReport `
-    -NoTypeInformation -Encoding UTF8
+    -NoTypeInformation -Encoding UTF8 -NoClobber -ErrorAction Stop
 
 # 8. Export folders needing review
 $findings = @(
@@ -101,13 +112,14 @@ $findings = @(
 
 if ($findings.Count -gt 0) {
     $findings | Export-Csv -LiteralPath $flagReport `
-        -NoTypeInformation -Encoding UTF8
+        -NoTypeInformation -Encoding UTF8 -NoClobber -ErrorAction Stop
 }
 else {
     # Create a report containing just column headings
-    $results | Select-Object -First 0 |
-        Export-Csv -LiteralPath $flagReport `
-        -NoTypeInformation -Encoding UTF8
+    $header = $results | Select-Object -First 1 |
+        ConvertTo-Csv -NoTypeInformation | Select-Object -First 1
+    $header | Out-File -LiteralPath $flagReport `
+        -Encoding UTF8 -NoClobber -ErrorAction Stop
 }
 
 # 9. Display a summary
@@ -119,6 +131,11 @@ Write-Host ""
 Write-Host "FOLDER PERMISSIONS AUDIT COMPLETE"
 Write-Host "---------------------------------"
 Write-Host "Folders discovered: $($allFolders.Count)"
+Write-Host "Folder discovery errors: $($discoveryErrors.Count)"
+Write-Host "Folders unable to audit: $auditFailures"
+if ($discoveryErrors.Count -gt 0 -or $auditFailures -gt 0) {
+    Write-Warning "Audit coverage is incomplete. Review the warnings before interpreting zero findings."
+}
 Write-Host "Permission rules: $($results.Count)"
 Write-Host "Folders flagged: $($flaggedFolders.Count)"
 Write-Host ""
