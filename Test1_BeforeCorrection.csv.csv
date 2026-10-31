@@ -1,0 +1,2 @@
+﻿Folder,AccountOrGroup,Permission,RuleType,Inherited,EveryoneFlag
+C:\Users\DemoUser\PermissionsAuditDemo\PublicShare,Everyone,"ReadAndExecute, Synchronize",Allow,False,REVIEW
